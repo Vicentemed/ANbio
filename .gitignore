@@ -1,0 +1,71 @@
+# ============================================================
+# ANbio — archivos que NO deben subirse al repositorio
+# ============================================================
+
+# ---- CREDENCIALES (crítico: contienen contraseñas en texto plano) ----
+credentials.R
+runapp.txt
+*credential*
+*password*
+*.pem
+*.key
+# La plantilla SÍ debe publicarse (no lleva claves reales)
+!credentials.example.R
+
+# ---- Datos de pacientes / secuencias ----
+# Los FASTQ son datos sensibles y pesados: nunca al repositorio
+Datos/
+datos/
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+*.fasta
+*.fa
+*.fna
+*.bam
+*.sam
+*.vcf
+
+# ---- Sesiones y estado local ----
+*.anbio
+.anbio_session/
+sesiones/
+
+# ---- Reportes generados ----
+ANbio_reporte_final_*.html
+reporte_bioinformatico_*.html
+reporte_bioinformatico_*.pdf
+reporte_bioinformatico_*.docx
+anbio_backup_*.json
+*_files/
+*.knit.md
+*.utf8.md
+
+# ---- R ----
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+.Renviron
+
+# ---- Logs ----
+*.log
+logs/
+
+# ---- Documentos de trabajo internos ----
+# (quitar de esta lista lo que sí quieras publicar)
+*.docx
+*.pdf
+
+# ---- Herramientas de desarrollo ----
+.claude/
+.vscode/
+.idea/
+
+# ---- Sistema operativo ----
+.DS_Store
+Thumbs.db
+desktop.ini
+~$*

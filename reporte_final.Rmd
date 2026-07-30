@@ -1,0 +1,445 @@
+---
+title: "`r params$d$titulo`"
+output:
+  html_document:
+    theme: cosmo
+    toc: true
+    toc_float:
+      collapsed: false
+    number_sections: true
+    highlight: tango
+    fig_caption: true
+    self_contained: true
+    df_print: kable
+params:
+  d: null
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
+                      fig.width = 9.5, fig.height = 5, dpi = 150)
+library(ggplot2); library(knitr); library(kableExtra)
+d <- params$d
+`%||%` <- function(a, b) if (!is.null(a) && length(a) > 0) a else b
+# Dibujo del árbol filogenético (parser propio, sin ape/ggtree)
+if (file.exists("R/tree_plot.R")) source("R/tree_plot.R")
+
+VERDE <- "#27AE60"; ROJO <- "#E74C3C"; AZUL <- "#2E86C1"; AZUL_O <- "#1A5276"
+PAL <- c("#2ECC71","#3498DB","#E74C3C","#F39C12","#9B59B6","#16A085","#E67E22")
+
+tabla <- function(df, ...) {
+  kable(df, ...) |>
+    kable_styling(bootstrap_options = c("striped","hover","bordered"),
+                  full_width = FALSE, position = "left")
+}
+hay <- function(x) !is.null(x) && ((is.data.frame(x) && nrow(x) > 0) ||
+                                   (!is.data.frame(x) && length(x) > 0))
+sin_datos <- function(txt = "Esta etapa no produjo resultados.")
+  cat("<div style='background:#fdf2e9;border-left:4px solid #e67e22;padding:9px 13px;",
+      "border-radius:4px;color:#7e5109;'>", txt, "</div>\n\n", sep = "")
+```
+
+<div style="background:linear-gradient(135deg,#1a5276,#2e86c1);color:white;padding:22px 26px;border-radius:10px;margin-bottom:26px;">
+<h1 style="color:white;margin:0 0 8px;border:none;">`r d$titulo`</h1>
+<p style="color:#d6eaf8;margin:0;font-size:15px;">
+<b>`r d$institucion`</b> &nbsp;·&nbsp; `r d$fecha`
+`r if (nchar(d$analista %||% "")) paste0("&nbsp;·&nbsp; Analista: ", d$analista)`
+</p>
+</div>
+
+# Resumen del análisis
+
+```{r resumen}
+info <- data.frame(
+  Campo = c("Proyecto","Organismo","Muestras analizadas","Fecha del reporte","Plataformas"),
+  Valor = c(
+    d$proyecto  %||% "—",
+    d$organismo %||% "—",
+    paste0(length(d$muestras %||% character(0)), ": ",
+           paste(d$muestras %||% "—", collapse = ", ")),
+    d$fecha,
+    "BV-BRC · Galaxy (usegalaxy.org)"
+  ), stringsAsFactors = FALSE)
+tabla(info, col.names = c("", ""))
+```
+
+```{r etapas_estado, results='asis'}
+et <- d$etapas %||% list()
+if (length(et)) {
+  cat("## Estado de las etapas\n\n")
+  df_e <- data.frame(
+    `Nº` = seq_along(et),
+    Etapa = names(et),
+    Estado = vapply(et, function(x) if (isTRUE(x)) "✅ Completada" else "⏳ Sin datos", ""),
+    check.names = FALSE, stringsAsFactors = FALSE)
+  print(tabla(df_e))
+  n_ok <- sum(vapply(et, isTRUE, logical(1)))
+  cat("\n**", n_ok, " de ", length(et), " etapas completadas.**\n\n", sep = "")
+}
+```
+
+---
+
+# Paso 1 · Control de calidad de lecturas
+
+> Herramienta: **Fastq Utilities (BV-BRC)** — FastQC
+> Criterios (guía LESP): % ≥ Q30 ≥ 75–85 · Clusters PF ≥ 80 % · Error rate < 1 %
+
+```{r p1, results='asis'}
+if (hay(d$calidad)) {
+  print(tabla(d$calidad, digits = 2))
+} else sin_datos("No se importaron métricas de calidad.")
+```
+
+```{r p1_plot, fig.cap="Figura 1. Lecturas obtenidas por muestra (millones).", eval=hay(d$calidad)}
+df <- d$calidad
+if ("Reads_M" %in% names(df) && any(!is.na(df$Reads_M))) {
+  ggplot(df, aes(x = Muestra, y = Reads_M, fill = Muestra)) +
+    geom_col(width = .6, show.legend = FALSE) +
+    geom_text(aes(label = round(Reads_M, 2)), vjust = -.4, fontface = "bold") +
+    scale_fill_manual(values = rep(PAL, 9)[seq_len(nrow(df))]) +
+    labs(title = "Lecturas por muestra", y = "Millones de lecturas", x = "") +
+    theme_minimal(base_size = 13)
+}
+```
+
+---
+
+# Paso 2 · Clasificación taxonómica
+
+> Herramienta: **Kraken2 (Galaxy)** — base RefSeq Standard
+> Criterio: contaminación < 5 %
+
+```{r p2, results='asis'}
+if (hay(d$taxonomia)) {
+  print(tabla(d$taxonomia, digits = 2))
+  cat("\n> **Nota:** el % corresponde al nivel de **género**. Kraken2 deja la mayoría",
+      "de las lecturas en el género cuando la especie no es discriminable",
+      "(p. ej. complejo *A. calcoaceticus/baumannii*).\n\n")
+} else sin_datos("No se importaron resultados taxonómicos.")
+```
+
+```{r p2_plot, fig.cap="Figura 2. Contaminación por muestra. La línea roja marca el umbral máximo (5 %).", eval=hay(d$taxonomia)}
+df <- d$taxonomia
+if ("Contaminacion" %in% names(df) && any(!is.na(df$Contaminacion))) {
+  ggplot(df, aes(x = Muestra, y = Contaminacion, fill = Contaminacion > 5)) +
+    geom_col(width = .6) +
+    geom_hline(yintercept = 5, linetype = "dashed", color = ROJO, linewidth = 1) +
+    scale_fill_manual(values = c(`FALSE` = VERDE, `TRUE` = ROJO), name = "> 5 %") +
+    labs(title = "Contaminación (%)", y = "%", x = "") +
+    theme_minimal(base_size = 13)
+}
+```
+
+---
+
+# Paso 3 · Ensamblado genómico
+
+> Herramienta: **Assembly Service (BV-BRC)** — Unicycler
+> Criterios: cobertura ≥ 95 % · profundidad ≥ 30X · contigs < 200 · N50 > 50 kb
+
+```{r p3, results='asis'}
+if (hay(d$ensamblado)) {
+  print(tabla(d$ensamblado, digits = 2))
+} else sin_datos("No se importaron métricas de ensamblado.")
+```
+
+```{r p3_plot, fig.cap="Figura 3. Métricas del ensamblado frente a los umbrales de la guía (línea roja).", eval=hay(d$ensamblado), fig.height=4.2}
+df <- d$ensamblado
+cols <- intersect(c("Contigs","N50_kb","Profundidad"), names(df))
+if (length(cols)) {
+  lg <- do.call(rbind, lapply(cols, function(cc)
+    data.frame(Muestra = df$Muestra, Metrica = cc, Valor = df[[cc]])))
+  um <- data.frame(Metrica = c("Contigs","N50_kb","Profundidad"),
+                   Umbral  = c(200, 50, 30))
+  um <- um[um$Metrica %in% cols, ]
+  ggplot(lg, aes(x = Muestra, y = Valor, fill = Muestra)) +
+    geom_col(width = .6, show.legend = FALSE) +
+    geom_hline(data = um, aes(yintercept = Umbral),
+               linetype = "dashed", color = ROJO, linewidth = .8) +
+    facet_wrap(~Metrica, scales = "free_y",
+               labeller = labeller(Metrica = c(Contigs = "N.º de contigs (< 200)",
+                                               N50_kb = "N50 en kb (> 50)",
+                                               Profundidad = "Profundidad X (≥ 30)"))) +
+    scale_fill_manual(values = rep(PAL, 9)[seq_len(nrow(df))]) +
+    labs(x = "", y = "") + theme_minimal(base_size = 12) +
+    theme(strip.text = element_text(face = "bold"))
+}
+```
+
+---
+
+# Paso 4 · Anotación genómica
+
+> Herramienta: **Genome Annotation (BV-BRC)** — RASTtk
+
+```{r p4, results='asis'}
+if (hay(d$anotacion)) {
+  print(tabla(d$anotacion, digits = 1))
+} else sin_datos("No se importaron resultados de anotación.")
+```
+
+```{r p4_plot, fig.cap="Figura 4. Genes codificantes (CDS) y proporción con función asignada.", eval=hay(d$anotacion), fig.height=4}
+df <- d$anotacion
+if ("CDS" %in% names(df)) {
+  df$Con_funcion <- df$CDS - (df$Hipoteticos %||% 0)
+  lg <- rbind(
+    data.frame(Muestra = df$Muestra, Tipo = "Con función asignada", n = df$Con_funcion),
+    data.frame(Muestra = df$Muestra, Tipo = "Hipotéticos",          n = df$Hipoteticos))
+  ggplot(lg, aes(x = Muestra, y = n, fill = Tipo)) +
+    geom_col(width = .6) +
+    scale_fill_manual(values = c("Con función asignada" = AZUL, "Hipotéticos" = "#AEB6BF")) +
+    labs(title = "Composición de los CDS anotados", y = "N.º de genes", x = "") +
+    theme_minimal(base_size = 13) + theme(legend.position = "bottom")
+}
+```
+
+---
+
+# Paso 5 · Resistoma
+
+> Herramientas: **Metagenomic Read Mapping (BV-BRC/CARD)** y **RGI** en la anotación
+> Clasificación: MDR > 3 grupos · XDR > 10 grupos · PDR todos los grupos
+
+```{r p5_sir, results='asis'}
+if (hay(d$amr_sir)) {
+  cat("## Perfil fenotípico predicho (antibiograma in silico)\n\n")
+  s <- d$amr_sir
+  abs_all <- sort(unique(s$Antibiotico))
+  ms <- sort(unique(s$Muestra))
+  m <- matrix("", length(abs_all), length(ms), dimnames = list(abs_all, ms))
+  for (i in seq_len(nrow(s))) m[s$Antibiotico[i], s$Muestra[i]] <- s$Prediccion[i]
+  df_sir <- data.frame(Antibiótico = rownames(m), m, check.names = FALSE)
+  k <- kable(df_sir, row.names = FALSE) |>
+    kable_styling(bootstrap_options = c("striped","bordered"), full_width = FALSE)
+  for (j in seq_along(ms))
+    k <- column_spec(k, j + 1,
+      background = ifelse(m[, j] == "R", "#fadbd8",
+                   ifelse(m[, j] == "S", "#d5f5e3", "#fdebd0")),
+      bold = TRUE)
+  print(k)
+  nR <- apply(m, 2, function(cc) sum(cc == "R"))
+  cat("\n**Antibióticos con resistencia predicha:** ",
+      paste(paste0(names(nR), ": ", nR), collapse = " · "), "\n\n", sep = "")
+}
+```
+
+```{r p5_genes, results='asis'}
+if (hay(d$resfinder_df)) {
+  cat("## Genes de resistencia detectados\n\n")
+  df <- d$resfinder_df
+  if ("Antibiotico" %in% names(df)) {
+    tb <- as.data.frame(table(Clase = df$Antibiotico), stringsAsFactors = FALSE)
+    tb <- tb[order(-tb$Freq), ]
+    print(tabla(tb, col.names = c("Clase de antibiótico", "N.º de genes")))
+    ng <- length(unique(df$Antibiotico[df$Antibiotico != "Otros"]))
+    clasif <- if (ng > 10) "**XDR**" else if (ng > 3) "**MDR**" else "No MDR"
+    cat("\n> **Clasificación:** ", clasif, " — ", ng,
+        " grupos de antibióticos afectados.\n\n", sep = "")
+  }
+  cat("\n### Detalle de genes\n\n")
+  print(tabla(utils::head(df, 60), digits = 2))
+} else if (!hay(d$amr_sir)) sin_datos("No se importaron datos de resistoma.")
+```
+
+```{r p5_plot, fig.cap="Figura 5. Genes de resistencia por clase de antibiótico.", eval=hay(d$resfinder_df)}
+df <- d$resfinder_df
+if ("Antibiotico" %in% names(df)) {
+  tb <- as.data.frame(table(Clase = df$Antibiotico), stringsAsFactors = FALSE)
+  ggplot(tb, aes(x = reorder(Clase, Freq), y = Freq, fill = Freq)) +
+    geom_col() + coord_flip() +
+    scale_fill_gradient(low = "#F5B7B1", high = "#C0392B") +
+    labs(title = "Genes de resistencia por clase", x = "", y = "N.º de genes") +
+    theme_minimal(base_size = 12) + theme(legend.position = "none")
+}
+```
+
+---
+
+# Paso 6 · Alineamiento de secuencias
+
+> Herramientas: **BLAST/BBH (BV-BRC)** · MUSCLE/Clustal Omega (EBI)
+
+```{r p6, results='asis'}
+if (hay(d$alineamiento)) {
+  print(tabla(d$alineamiento, digits = 2))
+} else if (!is.null(d$pangenoma)) {
+  cat("El alineamiento se resolvió mediante **hits bidireccionales (BBH)** dentro del",
+      "análisis de genómica comparativa (paso 9): se alinearon",
+      "**", format(d$pangenoma$total %||% 0, big.mark = ","), "** genes del genoma de referencia.\n\n")
+} else sin_datos("No se registraron alineamientos.")
+```
+
+---
+
+# Paso 7 · Tipificación MLST
+
+> Herramientas: **MLST (Galaxy)** · Core Genome MLST (BV-BRC)
+
+```{r p7, results='asis'}
+if (hay(d$mlst)) {
+  print(tabla(d$mlst))
+  sts <- unique(d$mlst$ST)
+  if (length(sts) == 1)
+    cat("\n> Las **", nrow(d$mlst), " muestras comparten el mismo Sequence Type (ST",
+        sts, ")**, lo que indica relación clonal.\n\n", sep = "")
+} else sin_datos("No se importaron resultados de MLST.")
+```
+
+```{r p7_plot, fig.cap="Figura 6. Distribución de Sequence Types.", eval=hay(d$mlst), fig.height=3.6}
+tb <- as.data.frame(table(ST = d$mlst$ST), stringsAsFactors = FALSE)
+ggplot(tb, aes(x = ST, y = Freq, fill = ST)) +
+  geom_col(width = .45, show.legend = FALSE) +
+  geom_text(aes(label = Freq), vjust = -.4, size = 6, fontface = "bold") +
+  scale_fill_manual(values = rep(PAL, 9)[seq_len(nrow(tb))]) +
+  scale_y_continuous(limits = c(0, max(tb$Freq) * 1.3)) +
+  labs(title = "Sequence Types", x = "", y = "N.º de aislamientos") +
+  theme_minimal(base_size = 13)
+```
+
+---
+
+# Paso 8 · Filogenia
+
+> Herramienta: **CodonTree / Phylogenetic Tree (BV-BRC)** — RAxML
+
+```{r p8_txt, results='asis'}
+hay_arbol <- !is.null(d$newick) && nchar(trimws(d$newick %||% "")) > 0
+if (hay_arbol) {
+  cat("Árbol construido a partir de genes core (proteínas concatenadas).",
+      "Los números sobre las ramas son valores de **bootstrap**;",
+      "la barra inferior indica la escala de distancia evolutiva.",
+      "Las muestras del estudio se marcan en **rojo**.\n\n")
+} else sin_datos("Aún no se ha importado el árbol filogenético.")
+```
+
+```{r p8_arbol, fig.cap="Figura 6. Árbol filogenético de máxima verosimilitud (genes core).", eval=hay_arbol, fig.height=5.4}
+p <- tryCatch(
+  plot_newick(d$newick, titulo = NULL,
+              resaltar  = d$resaltar_arbol %||% d$muestras,
+              renombrar = d$renombrar_arbol),
+  error = function(e) NULL)
+if (!is.null(p)) print(p) else
+  cat("No se pudo dibujar el árbol; el Newick se incluye más abajo.")
+```
+
+```{r p8_nwk, results='asis', eval=hay_arbol}
+cat("<details><summary>Ver el árbol en formato Newick</summary>\n\n```\n",
+    trimws(d$newick), "\n```\n\n</details>\n\n", sep = "")
+cat("Para análisis interactivo, cargue este Newick en ",
+    "[iTOL](https://itol.embl.de/) o [Phylo.io](https://phylo.io/).\n\n")
+```
+
+---
+
+# Paso 9 · Genómica comparativa
+
+> Herramientas: **Proteome Comparison (BV-BRC)** · ANI
+
+```{r p9, results='asis'}
+if (!is.null(d$pangenoma)) {
+  pg <- d$pangenoma
+  df <- data.frame(
+    Categoría = c("Genes del genoma de referencia","Core (en todos los genomas)",
+                  "Accesorios (en algunos)","Únicos de la referencia"),
+    Genes = c(pg$total %||% NA, pg$core %||% NA,
+              pg$accesorios %||% NA, pg$unicos %||% NA))
+  df$`%` <- round(100 * df$Genes / (pg$total %||% NA), 1)
+  print(tabla(df))
+  if (!is.na(pg$core %||% NA) && !is.na(pg$total %||% NA))
+    cat("\n> El **", round(100 * pg$core / pg$total, 1),
+        "%** del genoma es compartido por todos los aislamientos.\n\n", sep = "")
+} else sin_datos("No se importaron datos de genómica comparativa.")
+```
+
+```{r p9_plot, fig.cap="Figura 7. Estructura del pangenoma.", eval=!is.null(d$pangenoma), fig.height=4.2}
+pg <- d$pangenoma
+df <- data.frame(Categoria = c("Core","Accesorios","Únicos"),
+                 Genes = c(pg$core %||% 0, pg$accesorios %||% 0, pg$unicos %||% 0))
+df <- df[df$Genes > 0, ]
+ggplot(df, aes(x = "", y = Genes, fill = Categoria)) +
+  geom_col(width = 1, color = "white") + coord_polar("y") +
+  geom_text(aes(label = paste0(Categoria, "\n", format(Genes, big.mark = ","))),
+            position = position_stack(vjust = .5), color = "white", fontface = "bold", size = 3.6) +
+  scale_fill_manual(values = c(Core = VERDE, Accesorios = AZUL, `Únicos` = ROJO)) +
+  labs(title = "Pangenoma") + theme_void(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+```{r p9_ani, results='asis', eval=hay(d$ani)}
+cat("## Identidad nucleotídica promedio (ANI)\n\n")
+print(tabla(d$ani, digits = 2))
+cat("\n> Criterio: ANI ≥ 95 % = misma especie · ANI ≥ 99 % = posible relación clonal.\n\n")
+```
+
+---
+
+# Interpretación y observaciones
+
+```{r interp, results='asis'}
+obs <- character(0)
+if (hay(d$mlst) && length(unique(d$mlst$ST)) == 1)
+  obs <- c(obs, paste0("Todos los aislamientos comparten el **ST", unique(d$mlst$ST),
+                       "**, con perfil alélico idéntico."))
+if (!is.null(d$pangenoma) && !is.na(d$pangenoma$core %||% NA))
+  obs <- c(obs, paste0("El genoma core representa el **",
+                       round(100 * d$pangenoma$core / d$pangenoma$total, 1),
+                       "%** de los genes, consistente con aislamientos estrechamente relacionados."))
+if (hay(d$resfinder_df) && "Antibiotico" %in% names(d$resfinder_df)) {
+  ng <- length(unique(d$resfinder_df$Antibiotico[d$resfinder_df$Antibiotico != "Otros"]))
+  obs <- c(obs, paste0("Se detectaron genes de resistencia en **", ng,
+                       "** clases de antibióticos."))
+}
+if (hay(d$ensamblado)) {
+  mala <- d$ensamblado[!is.na(d$ensamblado$Contigs) & d$ensamblado$Contigs > 200, ]
+  if (nrow(mala))
+    obs <- c(obs, paste0("⚠️ Ensamblado fragmentado (> 200 contigs) en: **",
+                         paste(mala$Muestra, collapse = ", "),
+                         "** — interpretar con cautela; considerar re-secuenciación."))
+}
+if (hay(d$anotacion)) {
+  cont <- d$anotacion[!is.na(d$anotacion$Contaminacion) & d$anotacion$Contaminacion > 5, ]
+  if (nrow(cont))
+    obs <- c(obs, paste0("⚠️ Contaminación > 5 % (CheckM) en: **",
+                         paste(cont$Muestra, collapse = ", "), "**."))
+}
+if (length(obs)) for (o in obs) cat("- ", o, "\n") else
+  cat("*Sin observaciones automáticas.*\n")
+cat("\n")
+if (nchar(d$notas %||% "") > 0) cat("\n## Notas del analista\n\n", d$notas, "\n\n")
+```
+
+---
+
+# Herramientas utilizadas
+
+```{r tools}
+tabla(data.frame(
+  Etapa = c("1 Calidad","2 Taxonomía","3 Ensamblado","4 Anotación","5 Resistoma",
+            "6 Alineamiento","7 MLST","8 Filogenia","9 Comparativa"),
+  Herramienta = c("Fastq Utilities (FastQC)","Kraken2","Assembly Service (Unicycler)",
+                  "Genome Annotation (RASTtk)","Metagenomic Read Mapping (CARD) + RGI",
+                  "BLAST / BBH","MLST (esquema Pasteur)","CodonTree (RAxML)",
+                  "Proteome Comparison"),
+  Plataforma = c("BV-BRC","Galaxy","BV-BRC","BV-BRC","BV-BRC","BV-BRC","Galaxy","BV-BRC","BV-BRC"),
+  stringsAsFactors = FALSE))
+```
+
+---
+
+```{r validacion, results='asis'}
+# La leyenda del pie es editable desde la app (campo "Leyenda al pie del
+# reporte"). Si no se pasa ninguna, se usa este texto por defecto.
+leyenda <- d$leyenda %||% paste(
+  "Reporte Generado Automáticamente por ANbio-Vicente Esparza-Villalpando",
+  "a partir de ejecución de datos en BV-BRC y Galaxy.")
+leyenda <- gsub("\n", "<br>", trimws(leyenda))
+
+cat('<div style="background:#f8f9f9;border-radius:8px;padding:16px 20px;margin-top:26px;">',
+    '<b>Validación</b><br><br>',
+    'Analista: ', if (nchar(d$analista %||% "")) d$analista else "______________________________", '<br>',
+    'Institución: ', d$institucion, '<br>',
+    'Fecha de emisión: ', d$fecha, '<br><br><hr>',
+    '<small style="color:#666;">', leyenda, '</small></div>', sep = "")
+```
+

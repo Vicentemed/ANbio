@@ -1,0 +1,474 @@
+---
+title: "`r params$datos$titulo`"
+author: "`r params$datos$autor`"
+date: "`r params$datos$fecha`"
+output:
+  html_document:
+    theme: cosmo
+    toc: true
+    toc_float:
+      collapsed: false
+    number_sections: true
+    highlight: tango
+    fig_caption: true
+    self_contained: true
+  pdf_document:
+    toc: true
+    number_sections: true
+    latex_engine: xelatex
+  word_document:
+    toc: true
+    number_sections: true
+params:
+  datos: null
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width  = 9,
+  fig.height = 5,
+  dpi = 150
+)
+library(ggplot2)
+library(dplyr)
+library(knitr)
+library(kableExtra)
+
+d <- params$datos
+
+# Paleta institucional LESP
+col_aprobado  <- "#27AE60"
+col_revisar   <- "#E74C3C"
+col_primario  <- "#2E86C1"
+col_secundario<- "#1A5276"
+pal_muestras  <- c("#2ECC71","#3498DB","#E74C3C","#F39C12","#9B59B6")
+```
+
+---
+
+<!-- Encabezado institucional -->
+<div style="background:linear-gradient(135deg,#1a5276,#2e86c1);color:white;padding:18px 24px;border-radius:8px;margin-bottom:24px;">
+  <h2 style="color:white;margin:0 0 6px;">`r d$titulo`</h2>
+  <p style="color:#d6eaf8;margin:0;">**`r d$institucion`** &nbsp;|&nbsp; `r d$fecha`</p>
+</div>
+
+---
+
+# Información General del Proyecto
+
+```{r info_general}
+info <- data.frame(
+  Campo = c("Proyecto", "Organismo", "Analista", "Institución", "Fecha de análisis", "Tipo de muestra"),
+  Valor = c(
+    ifelse(is.null(d$proyecto)    || nchar(trimws(d$proyecto))==0,    "—", d$proyecto),
+    ifelse(is.null(d$organismo)   || nchar(trimws(d$organismo))==0,   "—", d$organismo),
+    ifelse(is.null(d$analista)    || nchar(trimws(d$analista))==0,    "—", d$analista),
+    ifelse(is.null(d$institucion) || nchar(trimws(d$institucion))==0, "—", d$institucion),
+    d$fecha,
+    "Bacteria no tuberculosa (NGS Illumina)"
+  )
+)
+kable(info, col.names = c("Campo","Valor"), align = c("l","l")) %>%
+  kable_styling(bootstrap_options = c("striped","hover"), full_width = FALSE, position = "left") %>%
+  column_spec(1, bold = TRUE, width = "15em")
+```
+
+**Muestras analizadas:** `r paste(d$muestras, collapse = ", ")`
+
+```{r resumen_ejecutivo, results='asis'}
+if (!is.null(d$resumen) && nchar(trimws(d$resumen)) > 0) {
+  cat("\n## Resumen Ejecutivo\n\n")
+  cat(d$resumen, "\n")
+}
+```
+
+---
+
+```{r sec_calidad, results='asis', eval=("calidad" %in% d$secciones)}
+cat("# Paso 1: Control de Calidad\n\n")
+cat("> **Herramienta principal:** [Fastq Utilities (BV-BRC)](https://www.bvbrc.org/app/FastqUtil)\n\n")
+cat("**Criterios de calidad:** % bases ≥ Q30 ≥ 75–85% | Clusters PF ≥ 80% | Error Rate < 1%\n\n")
+```
+
+```{r tabla_calidad, eval=("calidad" %in% d$secciones)}
+if (!is.null(d$calidad) && nrow(d$calidad) > 0) {
+  kable(d$calidad,
+        col.names = c("Muestra","% ≥ Q30","% GC","Reads (M)","% Duplicados","Estado"),
+        digits = 2) %>%
+    kable_styling(bootstrap_options = c("striped","hover","bordered"), full_width = FALSE) %>%
+    row_spec(which(d$calidad$Estado == "APROBADO"), background = "#d5f5e3") %>%
+    row_spec(which(d$calidad$Estado == "REVISAR"),  background = "#fadbd8")
+} else {
+  cat("*No se ingresaron datos de control de calidad.*\n\n")
+}
+```
+
+```{r plot_calidad, fig.cap="Figura 1. Porcentaje de bases con calidad Phred ≥ Q30 por muestra. La línea roja indica el umbral mínimo recomendado (75%).", eval=("calidad" %in% d$secciones && !is.null(d$calidad) && nrow(d$calidad) > 0)}
+df_cq <- d$calidad
+
+ggplot(df_cq, aes(x = Muestra, y = Q30, fill = Estado)) +
+  geom_col(width = 0.6) +
+  geom_hline(yintercept = 75, linetype = "dashed", color = "red", linewidth = 1) +
+  annotate("text", x = 0.7, y = 76.5, label = "Mínimo 75%", color = "red", size = 3.5) +
+  scale_fill_manual(values = c("APROBADO" = col_aprobado, "REVISAR" = col_revisar)) +
+  scale_y_continuous(limits = c(0, 100)) +
+  labs(title = "Calidad de lecturas — % Bases ≥ Q30", y = "% Q30", x = "") +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+```{r calidad_notas, results='asis', eval=("calidad" %in% d$secciones)}
+if (!is.null(d$calidad_notas) && nchar(trimws(d$calidad_notas)) > 0) {
+  cat("\n**Observaciones:**", d$calidad_notas, "\n\n")
+}
+```
+
+---
+
+```{r sec_taxonomia, results='asis', eval=("taxonomia" %in% d$secciones)}
+cat("# Paso 2: Análisis Taxonómico\n\n")
+cat("> **Herramientas:** [Genome Distance (BV-BRC)](https://www.bvbrc.org/app/GenomeDistance) | [Taxonomic Classification (BV-BRC)](https://www.bvbrc.org/app/TaxonomicClassification)\n\n")
+cat("**Criterio:** Contaminación < 5% | Identificación a nivel de especie\n\n")
+```
+
+```{r tabla_taxonomia, eval=("taxonomia" %in% d$secciones)}
+if (!is.null(d$taxonomia) && nrow(d$taxonomia) > 0) {
+  df_t <- d$taxonomia
+  kable(df_t, col.names = c("Muestra","Especie","Confianza (%)","Contaminación (%)"), digits = 2) %>%
+    kable_styling(bootstrap_options = c("striped","hover","bordered"), full_width = FALSE) %>%
+    row_spec(which(!is.na(df_t$Contaminacion) & df_t$Contaminacion > 5), background = "#fadbd8")
+} else {
+  cat("*No se ingresaron datos taxonómicos.*\n\n")
+}
+```
+
+```{r plot_taxonomia, fig.cap="Figura 2. Porcentaje de contaminación por muestra. La línea roja indica el umbral máximo aceptable (5%).", eval=("taxonomia" %in% d$secciones && !is.null(d$taxonomia) && nrow(d$taxonomia) > 0 && !all(is.na(d$taxonomia$Contaminacion)))}
+df_tx <- d$taxonomia
+ggplot(df_tx, aes(x = Muestra, y = Contaminacion, fill = Contaminacion > 5)) +
+  geom_col(width = 0.6) +
+  geom_hline(yintercept = 5, linetype = "dashed", color = "red", linewidth = 1) +
+  scale_fill_manual(values = c("FALSE" = col_primario, "TRUE" = col_revisar), name = "> 5%") +
+  labs(title = "Contaminación por muestra (%)", y = "% Contaminación", x = "") +
+  theme_minimal(base_size = 13)
+```
+
+```{r tax_notas, results='asis', eval=("taxonomia" %in% d$secciones)}
+if (!is.null(d$tax_notas) && nchar(trimws(d$tax_notas)) > 0)
+  cat("\n**Interpretación:**", d$tax_notas, "\n\n")
+```
+
+---
+
+```{r sec_ensamblado, results='asis', eval=("ensamblado" %in% d$secciones)}
+cat("# Paso 3: Ensamblado Genómico\n\n")
+cat("> **Herramientas:** [SPAdes (Galaxy)](https://galaxymain.usegalaxy.org) | [Unicycler (Galaxy)](https://galaxymain.usegalaxy.org) | [Assembly Service (BV-BRC)](https://www.bvbrc.org/app/Assembly2)\n\n")
+cat("**Criterios:** Cobertura ≥ 95% | Profundidad ≥ 30X | Contigs < 200 | N50 > 50 kb\n\n")
+```
+
+```{r tabla_ensamblado, eval=("ensamblado" %in% d$secciones)}
+if (!is.null(d$ensamblado) && nrow(d$ensamblado) > 0) {
+  kable(d$ensamblado,
+        col.names = c("Muestra","Cobertura (%)","Profundidad (X)","Contigs","N50 (kb)","Tamaño (Mb)","GC (%)"),
+        digits = 2) %>%
+    kable_styling(bootstrap_options = c("striped","hover","bordered"), full_width = TRUE) %>%
+    column_spec(2, background = ifelse(!is.na(d$ensamblado$Cobertura) & d$ensamblado$Cobertura >= 95,
+                                       "#d5f5e3","#fadbd8")) %>%
+    column_spec(4, background = ifelse(!is.na(d$ensamblado$Contigs) & d$ensamblado$Contigs < 200,
+                                       "#d5f5e3","#fadbd8")) %>%
+    column_spec(5, background = ifelse(!is.na(d$ensamblado$N50_kb) & d$ensamblado$N50_kb >= 50,
+                                       "#d5f5e3","#fadbd8"))
+} else {
+  cat("*No se ingresaron métricas del ensamblado.*\n\n")
+}
+```
+
+```{r plot_ensamblado, fig.cap="Figura 3. Métricas clave del ensamblado genómico por muestra. Verde: cumple criterio. Rojo: requiere revisión.", eval=("ensamblado" %in% d$secciones && !is.null(d$ensamblado) && nrow(d$ensamblado) > 0)}
+df_ens <- d$ensamblado
+
+df_long <- tidyr::pivot_longer(df_ens[, c("Muestra","Cobertura","Profundidad","N50_kb")],
+                                cols = -Muestra, names_to = "Metrica", values_to = "Valor")
+umbrales <- data.frame(Metrica = c("Cobertura","Profundidad","N50_kb"),
+                       Umbral  = c(95, 30, 50),
+                       Etiqueta= c("≥95%","≥30X","≥50 kb"))
+
+ggplot(df_long, aes(x = Muestra, y = Valor, fill = Muestra)) +
+  geom_col(width = 0.6, show.legend = FALSE) +
+  geom_hline(data = umbrales, aes(yintercept = Umbral), linetype = "dashed", color = "red", linewidth = 0.8) +
+  facet_wrap(~Metrica, scales = "free_y",
+             labeller = labeller(Metrica = c(Cobertura="Cobertura (%)",
+                                              Profundidad="Profundidad (X)",
+                                              N50_kb="N50 (kb)"))) +
+  scale_fill_manual(values = setNames(pal_muestras[1:nrow(df_ens)], df_ens$Muestra)) +
+  labs(title = "Métricas del ensamblado genómico", x = "", y = "") +
+  theme_minimal(base_size = 12) +
+  theme(strip.text = element_text(face = "bold"))
+```
+
+```{r ens_notas, results='asis', eval=("ensamblado" %in% d$secciones)}
+if (!is.null(d$ens_notas) && nchar(trimws(d$ens_notas)) > 0)
+  cat("\n**Observaciones:**", d$ens_notas, "\n\n")
+```
+
+---
+
+```{r sec_anotacion, results='asis', eval=("anotacion" %in% d$secciones)}
+cat("# Paso 4: Anotación Genómica\n\n")
+cat("> **Herramientas:** [Comprehensive Genome Analysis (BV-BRC)](https://www.bvbrc.org/app/ComprehensiveGenomeAnalysis) | [Annotation Service (BV-BRC)](https://www.bvbrc.org/app/Annotation) | [Prokka (KBase)](https://narrative.kbase.us)\n\n")
+```
+
+```{r resumen_anotacion, eval=("anotacion" %in% d$secciones)}
+if (!is.null(d$anot_cds) && !is.na(d$anot_cds)) {
+  df_anot <- data.frame(
+    Parámetro = c("Total CDS anotados","CDS con función asignada (%)","CDS hipotéticos (%)","Genes ARNr","Genes ARNt"),
+    Valor = c(
+      ifelse(is.na(d$anot_cds),     "—", format(d$anot_cds,     big.mark=",")),
+      ifelse(is.na(d$anot_funcion), "—", paste0(d$anot_funcion, "%")),
+      ifelse(is.na(d$anot_funcion), "—", paste0(round(100-d$anot_funcion,1), "%")),
+      ifelse(is.null(d$anot_rrna) || is.na(d$anot_rrna), "—", d$anot_rrna),
+      ifelse(is.null(d$anot_trna) || is.na(d$anot_trna), "—", d$anot_trna)
+    )
+  )
+  kable(df_anot) %>%
+    kable_styling(bootstrap_options = c("striped","hover"), full_width = FALSE)
+}
+```
+
+```{r plot_anotacion, fig.cap="Figura 4. Distribución funcional del genoma por categorías COG.", eval=("anotacion" %in% d$secciones)}
+df_cog <- tryCatch({
+  txt <- d$anot_cog
+  if (!is.null(txt) && nchar(trimws(txt)) > 5) {
+    lineas <- strsplit(trimws(txt), "\n")[[1]]
+    lineas <- lineas[nchar(trimws(lineas)) > 0]
+    parts  <- strsplit(lineas, ":")
+    df_tmp <- data.frame(
+      Cat   = trimws(sapply(parts, `[[`, 1)),
+      Genes = suppressWarnings(as.numeric(trimws(gsub("[^0-9]","",
+              sapply(parts, function(x) ifelse(length(x)>1, x[2], "0")))))),
+      stringsAsFactors = FALSE
+    )
+    df_tmp[!is.na(df_tmp$Genes) & df_tmp$Genes > 0, ]
+  } else NULL
+}, error = function(e) NULL)
+
+if (is.null(df_cog) || nrow(df_cog) == 0) {
+  cat("*No se ingresaron datos de categorías funcionales (COG).*\n\n")
+} else {
+  print(
+    ggplot(df_cog, aes(x = reorder(Cat, Genes), y = Genes, fill = Genes)) +
+      geom_col() + coord_flip() +
+      scale_fill_gradient(low = "#AED6F1", high = col_secundario) +
+      labs(title = "Distribución funcional del genoma (COG)", x = "", y = "Número de genes") +
+      theme_minimal(base_size = 12) +
+      theme(legend.position = "none")
+  )
+}
+```
+
+```{r anot_notas, results='asis', eval=("anotacion" %in% d$secciones)}
+if (!is.null(d$anot_notas) && nchar(trimws(d$anot_notas)) > 0)
+  cat("\n**Observaciones:**", d$anot_notas, "\n\n")
+```
+
+---
+
+```{r sec_resistoma, results='asis', eval=("resistoma" %in% d$secciones)}
+cat("# Paso 5: Resistoma\n\n")
+cat("> **Herramientas:** [Comprehensive Genome Analysis (BV-BRC)](https://www.bvbrc.org/app/ComprehensiveGenomeAnalysis) | [ResFinder (DTU)](https://genepi.food.dtu.dk/resfinder) | [WHO GLASS](https://worldhealthorg.shinyapps.io/glassdashboard/#!/amr) | [Mykrobe](https://www.mykrobe.com/)\n\n")
+cat("**Clasificación:** MDR = >3 grupos | XDR = >10 grupos | PDR = todos los grupos\n\n")
+```
+
+```{r resistoma_genes, eval=("resistoma" %in% d$secciones)}
+filas <- c()
+if (!is.null(d$res_genes) && nchar(trimws(d$res_genes)) > 0)
+  filas <- c(filas, paste0("**Genes de resistencia detectados:** ", d$res_genes))
+if (!is.null(d$res_mutaciones) && nchar(trimws(d$res_mutaciones)) > 0)
+  filas <- c(filas, paste0("**Mutaciones cromosómicas:** ", d$res_mutaciones))
+if (!is.null(d$res_clasif) && length(d$res_clasif) > 0)
+  filas <- c(filas, paste0("**Clasificación:** ", paste(d$res_clasif, collapse=" / ")))
+if (length(filas) > 0) cat(paste(filas, collapse="\n\n"), "\n\n")
+```
+
+---
+
+```{r sec_alineamiento, results='asis', eval=("alineamiento" %in% d$secciones)}
+cat("# Paso 6: Alineamiento de Secuencias\n\n")
+cat("> **Herramientas:** [BLAST (BV-BRC)](https://www.bvbrc.org/app/Homology) | [Genome Alignment (BV-BRC)](https://www.bvbrc.org/app/GenomeAlignment) | [MUSCLE (EBI)](https://www.ebi.ac.uk/jdispatcher/msa/muscle) | [MAFFT](https://mafft.cbrc.jp/alignment/server/)\n\n")
+```
+
+```{r ali_tabla, results='asis', eval=("alineamiento" %in% d$secciones)}
+if (!is.null(d$alineamiento) && nrow(d$alineamiento) > 0) {
+  print(kable(d$alineamiento,
+        col.names=c("Comparación","Herramienta","Identidad (%)","Cobertura (%)","Gaps (%)","SNPs"),
+        digits=2) %>%
+    kable_styling(bootstrap_options=c("striped","hover"), full_width=TRUE))
+} else {
+  cat("*No se ingresaron resultados de alineamiento.*\n\n")
+}
+if (!is.null(d$ali_notas) && nchar(trimws(d$ali_notas)) > 0)
+  cat("\n**Interpretación:**", d$ali_notas, "\n\n")
+```
+
+---
+
+```{r sec_mlst, results='asis', eval=("mlst" %in% d$secciones)}
+cat("# Paso 7: MLST — Tipificación Multilocus\n\n")
+cat("> **Herramientas:** [Core Genome MLST (BV-BRC)](https://www.bvbrc.org/app/CoreGenomeMLST) | [MLST (Galaxy)](https://galaxymain.usegalaxy.org)\n\n")
+```
+
+```{r tabla_mlst, results='asis', eval=("mlst" %in% d$secciones)}
+if (!is.null(d$mlst) && nrow(d$mlst) > 0) {
+  print(kable(d$mlst, col.names=c("Muestra","Sequence Type (ST)","Perfil alélico","Esquema MLST")) %>%
+    kable_styling(bootstrap_options=c("striped","hover","bordered"), full_width=FALSE))
+} else {
+  cat("*No se ingresaron resultados de MLST.*\n\n")
+}
+```
+
+```{r plot_mlst, fig.cap="Figura 7. Distribución de Sequence Types (ST) entre los aislamientos.", eval=("mlst" %in% d$secciones && !is.null(d$mlst) && nrow(d$mlst) > 0)}
+df_st <- as.data.frame(table(ST=d$mlst$ST), stringsAsFactors=FALSE)
+ggplot(df_st, aes(x=reorder(ST,-Freq), y=Freq, fill=ST)) +
+  geom_col(width=0.5, show.legend=FALSE) +
+  geom_text(aes(label=Freq), vjust=-0.4, size=6, fontface="bold") +
+  scale_fill_brewer(palette="Set1") +
+  scale_y_continuous(limits=c(0, max(df_st$Freq)*1.3)) +
+  labs(title="Distribución de Sequence Types (ST)", x="ST", y="Número de aislamientos") +
+  theme_minimal(base_size=14)
+```
+
+```{r mlst_notas, results='asis', eval=("mlst" %in% d$secciones)}
+if (!is.null(d$mlst_notas) && nchar(trimws(d$mlst_notas)) > 0)
+  cat("\n**Interpretación epidemiológica:**", d$mlst_notas, "\n\n")
+```
+
+---
+
+```{r sec_filogenia, results='asis', eval=("filogenia" %in% d$secciones)}
+cat("# Paso 8: Filogenia\n\n")
+cat("> **Herramientas:** [IQ-TREE (Galaxy)](https://galaxymain.usegalaxy.org) | [Phylogenetic Tree (BV-BRC)](https://www.bvbrc.org/app/PhylogeneticTree) | [iTOL (EMBL)](https://itol.embl.de/) | [Phylogeny.fr](http://www.phylogeny.fr/)\n\n")
+```
+
+```{r filogenia_params, eval=("filogenia" %in% d$secciones)}
+f_params <- data.frame(
+  Parámetro = c("Método filogenético","Modelo evolutivo","Bootstrap mínimo"),
+  Valor = c(
+    ifelse(is.null(d$fil_metodo)    || length(d$fil_metodo)==0,    "—", d$fil_metodo),
+    ifelse(is.null(d$fil_modelo)    || length(d$fil_modelo)==0,    "—", d$fil_modelo),
+    ifelse(is.null(d$fil_bootstrap) || is.na(d$fil_bootstrap),    "—", paste0(d$fil_bootstrap, "%"))
+  )
+)
+kable(f_params) %>%
+  kable_styling(bootstrap_options=c("striped","hover"), full_width=FALSE)
+```
+
+```{r plot_filogenia, results='asis', eval=("filogenia" %in% d$secciones)}
+if (!is.null(d$fil_newick) && nchar(trimws(d$fil_newick)) > 0) {
+  cat("**Árbol filogenético (formato Newick) generado:**\n\n")
+  cat("```\n", trimws(d$fil_newick), "\n```\n\n", sep="")
+  cat("Para visualizarlo con valores de bootstrap, cargue este Newick en ",
+      "[iTOL](https://itol.embl.de/).\n\n")
+} else {
+  cat("*Aún no se ha importado el árbol filogenético (Newick).*\n\n")
+}
+```
+
+```{r fil_notas, results='asis', eval=("filogenia" %in% d$secciones)}
+if (!is.null(d$fil_notas) && nchar(trimws(d$fil_notas)) > 0)
+  cat("\n**Interpretación filogenética:**", d$fil_notas, "\n\n")
+```
+
+---
+
+```{r sec_genomica, results='asis', eval=("genomica" %in% d$secciones)}
+cat("# Paso 9: Genómica Comparativa\n\n")
+cat("> **Herramientas:** [ANI (EZBioCloud)](https://www.ezbiocloud.net/tools/ani) | [Proteome Comparison (BV-BRC)](https://www.bvbrc.org/app/SeqComparison) | [Proteómica (KBase)](https://narrative.kbase.us)\n\n")
+cat("**Criterio:** ANI ≥ 95% = misma especie | ANI ≥ 99% = mismo clon\n\n")
+```
+
+```{r ani_check, results='asis', eval=("genomica" %in% d$secciones && (is.null(d$ani) || nrow(d$ani) == 0))}
+cat("*No se ingresaron valores de ANI.*\n\n")
+```
+
+```{r plot_ani, fig.cap="Figura 9. Mapa de calor de Average Nucleotide Identity (ANI) entre aislamientos. Valores ≥99% indican posible relación clonal.", eval=("genomica" %in% d$secciones && !is.null(d$ani) && nrow(d$ani) > 0)}
+m <- sort(unique(c(d$ani$Muestra1, d$ani$Muestra2)))
+mat_ani <- matrix(NA_real_, length(m), length(m), dimnames=list(m,m))
+diag(mat_ani) <- 100
+for (i in seq_len(nrow(d$ani))) {
+  a <- d$ani$Muestra1[i]; b <- d$ani$Muestra2[i]; v <- d$ani$ANI[i]
+  if (a %in% m && b %in% m) { mat_ani[a,b] <- v; mat_ani[b,a] <- v }
+}
+df_ani_long <- as.data.frame(as.table(mat_ani))
+colnames(df_ani_long) <- c("M1","M2","ANI")
+
+ggplot(df_ani_long, aes(x=M1, y=M2, fill=ANI)) +
+  geom_tile(color="white", linewidth=0.5) +
+  geom_text(aes(label=ifelse(is.na(ANI),"",round(ANI,2))), size=4, fontface="bold") +
+  scale_fill_gradient2(low="#FEF9C3", mid="#F39C12", high="#C0392B",
+                       midpoint=99, limits=c(96,100), name="ANI (%)", na.value="#f0f0f0") +
+  labs(title="Heatmap ANI — Identidad nucleotídica promedio", x="", y="") +
+  theme_minimal(base_size=13) +
+  theme(axis.text.x=element_text(angle=45,hjust=1))
+```
+
+```{r plot_pangenoma, fig.cap="Figura 10. Estructura del pangenoma de los aislamientos analizados.", eval=("genomica" %in% d$secciones && !(is.null(d$gc_core)||is.na(d$gc_core)) && !(is.null(d$gc_acc)||is.na(d$gc_acc)))}
+core  <- d$gc_core
+acc   <- d$gc_acc
+uniq  <- ifelse(is.null(d$gc_uniq) || is.na(d$gc_uniq), 0, d$gc_uniq)
+df_pan <- data.frame(
+  Categoria = c("Core genoma","Genes accesorios","Genes únicos"),
+  Genes = c(core, acc, uniq)
+)
+ggplot(df_pan, aes(x="", y=Genes, fill=Categoria)) +
+  geom_col(width=1, color="white", linewidth=0.5) +
+  coord_polar("y", start=0) +
+  geom_text(aes(label=paste0(Categoria,"\n(n=",Genes,")")),
+            position=position_stack(vjust=0.5), size=3.5, color="white", fontface="bold") +
+  scale_fill_manual(values=c("Core genoma"="#2ECC71","Genes accesorios"="#3498DB","Genes únicos"="#E74C3C")) +
+  labs(title="Estructura del pangenoma", x="", y="") +
+  theme_void(base_size=13) +
+  theme(legend.position="bottom")
+```
+
+```{r gc_notas, results='asis', eval=("genomica" %in% d$secciones)}
+if (!is.null(d$gc_notas) && nchar(trimws(d$gc_notas)) > 0)
+  cat("\n**Interpretación comparativa:**", d$gc_notas, "\n\n")
+```
+
+---
+
+# Resumen de Herramientas Utilizadas
+
+```{r tabla_herramientas}
+df_tools <- data.frame(
+  Etapa = c("Control de calidad","Análisis taxonómico","Ensamblado","Anotación",
+             "Resistoma","Alineamiento","MLST","Filogenia","Genómica comparativa"),
+  Plataforma = c("BV-BRC","BV-BRC","Galaxy / BV-BRC","BV-BRC / KBase",
+                 "BV-BRC / ResFinder / Mykrobe","BV-BRC / EBI / NCBI",
+                 "BV-BRC / Galaxy","Galaxy / EMBL","EZBioCloud / BV-BRC / KBase"),
+  Herramienta_Principal = c("Fastq Utilities","Taxonomic Classification",
+                             "SPAdes / Assembly Service","Comprehensive Genome Analysis",
+                             "ResFinder / Comprehensive Genome Analysis",
+                             "BLAST / MUSCLE / MAFFT","Core Genome MLST / MLST",
+                             "IQ-TREE / Phylogenetic Tree","ANI / Proteome Comparison"),
+  stringsAsFactors = FALSE
+)
+kable(df_tools, col.names=c("Etapa","Plataforma","Herramienta principal")) %>%
+  kable_styling(bootstrap_options=c("striped","hover","bordered"), full_width=TRUE) %>%
+  column_spec(1, bold=TRUE)
+```
+
+---
+
+# Validación
+
+```{r validacion}
+cat(paste0(
+  "\n\n**Fecha de emisión del reporte:** ", d$fecha, "\n\n",
+  "**Analista:** ", ifelse(is.null(d$analista)||nchar(trimws(d$analista))==0,"____________________________",d$analista), "\n\n",
+  "**Institución:** ", d$institucion, "\n\n",
+  "___\n\n",
+  "*Reporte generado automáticamente por la aplicación Shiny de Análisis Bioinformático — VEV.*"
+))
+```
