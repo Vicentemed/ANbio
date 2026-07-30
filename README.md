@@ -1,6 +1,6 @@
-# LESP — Análisis Bioinformático de Patógenos NGS
+# ANbio — Análisis Bioinformático de Patógenos NGS
 
-**Laboratorio Estatal de Salud Pública — Aguascalientes**  
+**Análisis Bioinformático**  
 Aplicación Shiny para el análisis bioinformático de secuencias NGS (archivos FASTQ) de patógenos bacterianos.
 
 ---
