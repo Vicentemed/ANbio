@@ -294,7 +294,7 @@ Se escribe el organismo (p. ej. *Acinetobacter baumannii*) y se pulsa **"Iniciar
 | Proyecto | Análisis ACINE 2025 |
 | Organismo | *Acinetobacter baumannii* |
 | Analista | María García López |
-| Institución | LESP Aguascalientes |
+| Institución | LESP |
 | Fecha | 27/05/2026 |
 | Tipo de muestra | Bacterias no tuberculosas |
 
@@ -1051,7 +1051,7 @@ Sí: *Descargar sesión* genera un `.anbio` que se abre en el otro equipo con *A
 No. Antes de enviar sincroniza con el workspace y omite lo que ya tiene resultados **válidos**. Los jobs fallidos o vacíos sí se reintentan.
 
 **¿Los valores de Q30, GC, etc. se calculan automáticamente?**  
-GC, longitud y número de lecturas se importan del reporte de FastQC. **El % Q30 no lo reporta FastQC** — según la guía LESP proviene de BaseSpace, por lo que se captura a mano en la pantalla de Inicio.
+GC, longitud y número de lecturas se importan del reporte de FastQC. **El % Q30 no lo reporta FastQC** — proviene de BaseSpace, por lo que se captura a mano en la pantalla de Inicio.
 
 **¿Por qué la taxonomía usa Galaxy y no BV-BRC?**  
 Porque el servicio `TaxonomicClassification` de BV-BRC falla de forma sistemática. Kraken2 en Galaxy es la ruta que funciona. Lo mismo ocurre con MLST: `CoreGenomeMLST` no existe como app en BV-BRC.
