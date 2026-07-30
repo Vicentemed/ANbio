@@ -106,7 +106,7 @@ CRED_BVBRC_PASS <- "tu_contraseña"        # Contraseña BV-BRC
 CRED_GALAXY_KEY <- "tu_api_key_galaxy"    # API key de usegalaxy.org
 ```
 
-> ⚠️ **Seguridad:** `credentials.R` guarda contraseñas en **texto plano**. Está incluido en `.gitignore` — **nunca lo subas a un repositorio**.
+> ⚠️ **Seguridad:** `credentials.R` guarda contraseñas en **texto plano**. Está incluido en `.gitignore` — **nunca lo subir a un repositorio**.
 >
 > Si prefieres no guardarlas en disco, deja las cadenas vacías y captúralas desde la app (*Configurar credenciales*): no se escriben en ningún archivo.
 
