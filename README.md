@@ -29,7 +29,7 @@ Aplicación Shiny para el análisis bioinformático de secuencias NGS (archivos 
 
 ## 1. Descripción general
 
-La app guía al analista a través de las **9 etapas del flujo bioinformático** definido en la Guía Práctica del Curso de Bioinformática LESP 2026. Está diseñada para trabajar con archivos FASTQ provenientes de secuenciadores Illumina y organismos como *Acinetobacter baumannii*, *Mycobacterium tuberculosis* u otros patógenos prioritarios.
+La app guía al analista a través de las **9 etapas del flujo bioinformático**. Está diseñada para trabajar con archivos FASTQ provenientes de secuenciadores Illumina y organismos como *Acinetobacter baumannii*, *Mycobacterium tuberculosis* u otros patógenos prioritarios.
 
 **Lo que hace la app:**
 
