@@ -114,6 +114,14 @@ session_save_file <- function(rv, path, proyecto = list()) {
   }, error = function(e) { warning("session_save_file: ", e$message); FALSE })
 }
 
+# Escribir un payload YA construido (lista plana, sin valores reactivos).
+# Necesario en session$onSessionEnded(): ahí la sesión ya está destruida y
+# cualquier acceso a rv$... falla con "Can't access reactive value".
+session_write_payload <- function(payload, path) {
+  tryCatch({ saveRDS(payload, path); TRUE },
+           error = function(e) { warning("session_write_payload: ", e$message); FALSE })
+}
+
 # Cargar desde archivo; valida el formato
 session_load_file <- function(path) {
   if (!file.exists(path)) return(NULL)

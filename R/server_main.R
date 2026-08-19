@@ -546,11 +546,22 @@ server <- function(input, output, session) {
         if (isTRUE(fr$success) &&
             (length(fr$contents %||% list()) > 0)) {
           rv$job_results[[j$job_id]] <- fr
-          auto_import_results(fr, j)
-          n_ok <- n_ok + 1L
-          alog("OK", paste0("[AUTO] Importado: ", j$output_file %||% j$label),
-               paste0("tipo: ", fr$parsed$type %||% "?",
-                      " | archivos: ", length(fr$contents %||% list())))
+          # Un resultado con formato inesperado no debe tumbar toda la
+          # importación (ni la app): se registra y se continúa.
+          imp <- tryCatch({ auto_import_results(fr, j); TRUE },
+                          error = function(e) {
+                            alog("ERROR",
+                                 paste0("[AUTO] Error al interpretar: ",
+                                        j$output_file %||% j$label),
+                                 conditionMessage(e))
+                            FALSE
+                          })
+          if (isTRUE(imp)) {
+            n_ok <- n_ok + 1L
+            alog("OK", paste0("[AUTO] Importado: ", j$output_file %||% j$label),
+                 paste0("tipo: ", fr$parsed$type %||% "?",
+                        " | archivos: ", length(fr$contents %||% list())))
+          }
         } else {
           alog("WARN", paste0("[AUTO] Sin datos legibles: ", j$output_file %||% j$label),
                fr$error %||% "el job pudo fallar en BV-BRC")
@@ -2232,12 +2243,31 @@ server <- function(input, output, session) {
   })
 
   # ── AUTOGUARDADO al cerrar la app ──
-  session$onSessionEnded(function() {
+  # Copia NO reactiva del estado, refrescada dentro de contexto reactivo.
+  # En onSessionEnded la sesión ya está destruida y no se puede leer rv$...,
+  # así que se guarda esta instantánea.
+  snapshot_sesion <- NULL
+  snapshot_ruta   <- session_autosave_path("sesion_activa")
+
+  actualizar_snapshot <- function() {
     tryCatch({
-      nm <- isolate(rv$sesion_nombre) %||% "sesion_activa"
-      session_save_file(rv, session_autosave_path(nm), isolate(proyecto_meta()))
-      state_save(rv)
+      snapshot_sesion <<- session_payload(rv, proyecto_meta())
+      snapshot_ruta   <<- session_autosave_path(rv$sesion_nombre %||% "sesion_activa")
     }, error = function(e) NULL)
+    invisible(NULL)
+  }
+
+  # Se refresca en cada ciclo de sondeo (siempre en contexto reactivo)
+  observe({
+    poll_timer()
+    actualizar_snapshot()
+  })
+
+  session$onSessionEnded(function() {
+    # Sin acceso reactivo aquí: se escribe la instantánea ya construida.
+    if (!is.null(snapshot_sesion))
+      tryCatch(session_write_payload(snapshot_sesion, snapshot_ruta),
+               error = function(e) NULL)
   })
 
   # ============================================================
@@ -2736,8 +2766,22 @@ server <- function(input, output, session) {
          output_ids = ids, contents = contents, parsed = parsed)
   }
 
+  # Envoltura defensiva: un resultado con formato inesperado nunca debe
+  # tumbar la app. Registra el fallo y continúa.
   auto_import_results <- function(res, job) {
+    tryCatch(.auto_import_results(res, job), error = function(e) {
+      alog("ERROR",
+           paste0("No se pudo interpretar el resultado: ",
+                  job$output_file %||% job$label %||% "(sin nombre)"),
+           paste0(conditionMessage(e),
+                  "\nTipo detectado: ", res$parsed$type %||% "?"))
+      invisible(NULL)
+    })
+  }
+
+  .auto_import_results <- function(res, job) {
     parsed  <- res$parsed
+    if (is.null(parsed) || is.null(parsed$type)) return(invisible(NULL))
     muestra <- res$muestra %||% job$muestra %||% ""
 
     if (parsed$type == "calidad" && is.list(parsed$data) && length(parsed$data) > 0) {
@@ -2836,8 +2880,13 @@ server <- function(input, output, session) {
     step_of_type <- c(calidad = "calidad", taxonomia = "taxonomia",
                       ensamblado = "ensamblado", anotacion = "anotacion",
                       resistoma = "resistoma", mlst_galaxy = "mlst",
-                      newick = "filogenia")
-    pid_done <- step_of_type[[parsed$type %||% ""]]
+                      newick = "filogenia", genomica = "genomica",
+                      alineamiento = "alineamiento")
+    # OJO: `[[` con un nombre ausente lanza "subíndice fuera de los límites".
+    # parsed$type puede ser "raw" u otro valor no mapeado, así que se
+    # comprueba la pertenencia antes de indexar.
+    tipo_res <- parsed$type %||% ""
+    pid_done <- if (tipo_res %in% names(step_of_type)) step_of_type[[tipo_res]] else NULL
     if (!is.null(pid_done) && pid_done %in% names(rv$completados)) {
       rv$completados[pid_done] <- TRUE
       updateCheckboxInput(session, paste0("chk_", pid_done), value = TRUE)
